@@ -29,6 +29,7 @@ impl AssetLoader for TiledMapLoader {
     ) -> BoxedFuture<'a, Result<(), anyhow::Error>> {
         Box::pin(async move {
             let path = load_context.path();
+            println!("{:?}", path);
             let map = Map::try_from_bytes(path, bytes.into())?;
             load_context.set_default_asset(LoadedAsset::new(map));
             Ok(())

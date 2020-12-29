@@ -11,10 +11,10 @@ use bevy::{
     utils::HashMap,
 };
 use bevy_type_registry::TypeUuid;
-
+use tiled::{ TiledError};
 use crate::{loader::TiledMapLoader, TileMapChunk, TILE_MAP_PIPELINE_HANDLE};
 use glam::Vec2;
-use std::{collections::HashSet, io::BufReader, path::Path};
+use std::{collections::HashSet, io::BufReader, path::Path, slice::Iter};
 
 #[derive(Debug)]
 pub struct Tile {
@@ -95,9 +95,24 @@ impl Map {
             _ => panic!("Unsupported orientation {:?}", self.map.orientation),
         }
     }
+    /*
+    fn iter_tileset(map: &tiled::Map) -> Result<Iter<(u32, u32, tiled::Tileset)>> {
+        let last: Vec<Option<(u32, &tiled::Tileset)>> =  vec![ None ];
+        let ele = map.tilesets.iter().map(|t|  {match t {
+            tiled::TilesetElement::Tileset(first_gid, tileset) => Some((*first_gid, tileset)),
+            tiled::TilesetElement::Loaded(reference, tileset) => Some((reference.first_gid, tileset)),
+            _ => panic!("external tileset")
+        }});
 
-    pub fn try_from_bytes(asset_path: &Path, bytes: Vec<u8>) -> Result<Map> {
-        let map = tiled::parse_with_path(BufReader::new(bytes.as_slice()), asset_path).unwrap();
+        let all = ele.chain(last);
+        let first_gids = map.tilesets.windows(2); //.map(|tileset| tileset.get_first_gid()).collect();
+        
+    }
+    */
+    pub fn try_from_bytes(map_path: &Path, bytes: Vec<u8>) -> Result<Map> {
+        let real_fs_map_path = Path::new("assets").join(map_path);
+        let map = tiled::parse_with_path(BufReader::new(bytes.as_slice()), &real_fs_map_path).unwrap();
+        //let map = tiled::parse(BufReader::new(bytes.as_slice())).unwrap();
 
         let mut layers = Vec::new();
 
@@ -114,7 +129,10 @@ impl Map {
             }
             let mut tileset_layers = Vec::new();
 
-            for tileset in map.tilesets.iter() {
+            for tileset_element in map.tilesets.iter() {
+                let tileset = tileset_element.get_tileset()
+                .ok_or( TiledError::Other("map contains external tilesets".to_string()))?;
+
                 let tile_width = tileset.tile_width as f32;
                 let tile_height = tileset.tile_height as f32;
                 let image = tileset.images.first().unwrap();
@@ -148,14 +166,14 @@ impl Map {
                                     };
 
                                     let tile = map_tile.gid;
-                                    if tile < tileset.first_gid
-                                        || tile >= tileset.first_gid + tileset.tilecount.unwrap()
-                                    {
+                                    let first_gid = tileset_element.get_first_gid();
+                                    let tile_count = tileset.tilecount.unwrap_or(tileset.tiles.len() as u32);
+                                    if tile < first_gid || tile >= first_gid + tile_count {
                                         continue;
                                     }
 
                                     let tile = (TiledMapLoader::remove_tile_flags(tile) as f32)
-                                        - tileset.first_gid as f32;
+                                        - tileset_element.get_first_gid() as f32;
 
                                     // This calculation is much simpler we only care about getting the remainder
                                     // and multiplying that by the tile width.
@@ -266,7 +284,7 @@ impl Map {
                 let tileset_layer = TilesetLayer {
                     tile_size: Vec2::new(tile_width, tile_height),
                     chunks,
-                    tileset_guid: tileset.first_gid,
+                    tileset_guid: tileset_element.get_first_gid(),
                 };
                 tileset_layers.push(tileset_layer);
             }
@@ -334,7 +352,7 @@ impl Map {
             meshes,
             layers,
             tile_size,
-            image_folder: asset_path.parent().unwrap().into(),
+            image_folder: map_path.parent().unwrap().into(),
         };
 
         Ok(map)
@@ -454,13 +472,16 @@ pub fn process_loaded_tile_maps(
         let map = maps.get_mut(changed_map).unwrap();
 
         for (_, _, _, mut materials_map, _) in query.iter_mut() {
-            for tileset in &map.map.tilesets {
-                if !materials_map.contains_key(&tileset.first_gid) {
+            for tileset_element in &map.map.tilesets {
+                let tileset = tileset_element.get_tileset()
+                                .expect("map contains external tilesets");
+                
+                if !materials_map.contains_key(&tileset_element.get_first_gid()) {
                     let texture_path = map
                         .image_folder
                         .join(tileset.images.first().unwrap().source.as_str());
                     let texture_handle = asset_server.load(texture_path);
-                    materials_map.insert(tileset.first_gid, materials.add(texture_handle.into()));
+                    materials_map.insert(tileset_element.get_first_gid(), materials.add(texture_handle.into()));
                 }
             }
         }
