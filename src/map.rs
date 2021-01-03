@@ -105,9 +105,31 @@ impl Map {
         
     }
     */
-    pub fn try_from_bytes(map_path: &Path, bytes: Vec<u8>) -> Result<Map> {
-        let real_fs_map_path = Path::new("assets").join(map_path);
-        let map = tiled::parse_with_path(BufReader::new(bytes.as_slice()), &real_fs_map_path).unwrap();
+    pub fn try_from(map_path: &Path, map: tiled::Map) -> Result<Map> {
+        //let real_fs_map_path = Path::new("assets").join(map_path);
+        //let map = tiled::parse_with_path(BufReader::new(bytes.as_slice()), &real_fs_map_path).unwrap();
+        
+        for t in map.tilesets.iter() {
+            let (source, tileset) = match t {
+                tiled::TilesetElement::Reference(reference) => { (Some(&reference.source), None) }
+                tiled::TilesetElement::Tileset(_, tileset) => { (None, Some(tileset))}
+                tiled::TilesetElement::Loaded(reference, tileset) => { (Some(&reference.source), Some(tileset)) }
+            };
+
+            if let Some(tileset) = tileset {
+                println!("Loaded tileset: {}", tileset.name);
+                for image in tileset.images.iter() {
+                    println!("          image: {}", image.source);
+                }
+            } else {
+                println!("Tileset reference:")
+            }
+
+            if let Some(source) = source {
+                println!("      source: {}", source);
+            }
+
+        }
         //let map = tiled::parse(BufReader::new(bytes.as_slice())).unwrap();
 
         let mut layers = Vec::new();
@@ -131,6 +153,7 @@ impl Map {
 
                 let tile_width = tileset.tile_width as f32;
                 let tile_height = tileset.tile_height as f32;
+                println!("## {}: {:?}, {:?}",tileset.name, tileset.images, tileset.images.first());
                 let image = tileset.images.first().unwrap();
                 let texture_width = image.width as f32;
                 let texture_height = image.height as f32;
@@ -460,9 +483,7 @@ pub fn process_loaded_tile_maps(
                                 .expect("map contains external tilesets");
                 
                 if !materials_map.contains_key(&tileset_element.get_first_gid()) {
-                    let texture_path = map
-                        .image_folder
-                        .join(tileset.images.first().unwrap().source.as_str());
+                    let texture_path = tileset.images.first().unwrap().source.as_str();
                     let texture_handle = asset_server.load(texture_path);
                     materials_map.insert(tileset_element.get_first_gid(), materials.add(texture_handle.into()));
                 }
